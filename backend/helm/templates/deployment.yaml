@@ -1,0 +1,211 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "my-helm-chart.fullname" . }}-backend
+  labels:
+    app: {{ include "my-helm-chart.name" . }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "my-helm-chart.fullname" . }}-backend
+  template:
+    metadata:
+      labels:
+        app: {{ include "my-helm-chart.fullname" . }}-backend
+    spec:
+      initContainers:
+        - name: init-db
+          image: python:3.9-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Installing dependencies..."
+              pip install asyncpg python-dotenv
+              echo "Installing netcat..."
+              apt-get update && apt-get install -y netcat-traditional
+
+              echo "Waiting for PostgreSQL to be ready..."
+              for i in {1..60}; do
+                nc -zv $DB_HOST $DB_PORT && break
+                echo "PostgreSQL not ready yet. Retrying in 2 seconds..."
+                sleep 2
+              done
+              if ! nc -zv $DB_HOST $DB_PORT; then
+                echo "PostgreSQL is still not ready. Exiting."
+                exit 1
+              fi
+
+              echo "PostgreSQL is ready. Running database initialization..."
+              ls -l /backend/  # Debugging step
+              cat /backend/create_db.py  # Debugging step
+              python /backend/create_db.py
+
+          volumeMounts:
+            - name: scripts
+              mountPath: /backend/
+
+          envFrom:
+            - secretRef:
+                name: {{ include "my-helm-chart.fullname" . }}-secret
+
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "my-helm-chart.fullname" . }}-init-db
+            defaultMode: 0777 
+
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.registry }}/{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-helm-chart.fullname" . }}-secret
+                  key: DB_HOST
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-helm-chart.fullname" . }}-secret
+                  key: DB_USER
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-helm-chart.fullname" . }}-secret
+                  key: DB_PASS
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-helm-chart.fullname" . }}-secret
+                  key: DB_NAME
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-helm-chart.fullname" . }}-secret
+                  key: DB_PORT
+
+          resources:
+            requests:
+              cpu: {{ .Values.backend.resources.requests.cpu }}
+              memory: {{ .Values.backend.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.backend.resources.limits.cpu }}
+              memory: {{ .Values.backend.resources.limits.memory }}
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "my-helm-chart.fullname" . }}-pgadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "my-helm-chart.fullname" . }}-pgadmin
+  template:
+    metadata:
+      labels:
+        app: {{ include "my-helm-chart.fullname" . }}-pgadmin
+    spec:
+      containers:
+        - name: pgadmin
+          image: "dpage/pgadmin4:{{ .Values.pgadmin.image.tag | default "latest" }}"  
+          imagePullPolicy: {{ .Values.pgadmin.image.pullPolicy | default "Always" }} 
+          ports:
+            - containerPort: 80
+          envFrom:
+            - secretRef:
+                name: {{ include "my-helm-chart.fullname" . }}-secret
+          env:
+            - name: PGADMIN_DEFAULT_EMAIL
+              value: "{{ .Values.pgadmin.email }}"
+            - name: PGADMIN_DEFAULT_PASSWORD
+              valueFrom: 
+                secretKeyRef:
+                  name: {{ include "my-helm-chart.fullname" . }}-secret
+                  key: PGADMIN_DEFAULT_PASSWORD
+          resources:
+            requests:
+              cpu: {{ .Values.pgadmin.resources.requests.cpu }}
+              memory: {{ .Values.pgadmin.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.pgadmin.resources.limits.cpu }}
+              memory: {{ .Values.pgadmin.resources.limits.memory }}
+
+# ---
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: {{ include "my-helm-chart.fullname" . }}-postgres
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: {{ include "my-helm-chart.fullname" . }}-postgres
+#   template:
+#     metadata:
+#       labels:
+#         app: {{ include "my-helm-chart.fullname" . }}-postgres
+#     spec:
+#       containers:
+#         - name: postgres
+#           image: "postgres:13"
+#           ports:
+#             - containerPort: 5432
+#           env:
+#             - name: POSTGRES_USER
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: {{ include "my-helm-chart.fullname" . }}-secret
+#                   key: DB_USER
+#             - name: POSTGRES_PASSWORD
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: {{ include "my-helm-chart.fullname" . }}-secret
+#                   key: DB_PASS
+#             - name: POSTGRES_DB
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: {{ include "my-helm-chart.fullname" . }}-secret
+#                   key: DB_NAME
+#             - name: POSTGRES_INITDB_SKIP
+#               value: "true"  
+
+#           volumeMounts:
+#             - name: postgres-config
+#               mountPath: /etc/postgresql/pg_hba.conf
+#               subPath: pg_hba.conf
+#               readOnly: false
+#       volumes:
+#         - name: postgres-storage
+#           persistentVolumeClaim:
+#             claimName: {{ include "my-helm-chart.fullname" . }}-postgres-pvc
+#         - name: postgres-config
+#           configMap:
+#             name: {{ include "my-helm-chart.fullname" . }}-postgres-config
+        
