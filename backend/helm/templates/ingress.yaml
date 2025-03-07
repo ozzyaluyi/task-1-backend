@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "my-helm-chart.fullname" . }}-pgadmin
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: {{ .Values.pgadmin.ingress.hosts | first }} 
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "my-helm-chart.fullname" . }}-pgadmin
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - {{ .Values.pgadmin.ingress.hosts | first }} 
+      secretName: pgadmin-tls
+
+

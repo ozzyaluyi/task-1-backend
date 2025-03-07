@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "my-helm-chart.fullname" . }}-backend
+spec:
+  selector:
+    app: {{ include "my-helm-chart.fullname" . }}-backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "my-helm-chart.fullname" . }}-pgadmin
+spec:
+  selector:
+    app: {{ include "my-helm-chart.fullname" . }}-pgadmin
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "my-helm-chart.fullname" . }}-postgres
+spec:
+  selector:
+    app: {{ include "my-helm-chart.fullname" . }}-postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
