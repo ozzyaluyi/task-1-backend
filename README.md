@@ -1,4 +1,4 @@
-README: Exercise 1: Deploy FastAPI + PostgreSQL + pgAdmin on Minikube
+README: Deploy FastAPI + PostgreSQL + pgAdmin on Minikube
 Prerequisites
 Ensure you have the following installed:
 
