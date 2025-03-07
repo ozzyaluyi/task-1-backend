@@ -1,0 +1,98 @@
+name: Deploy FastAPI App to Minikube Kubernetes
+
+on:
+  push:
+    branches:
+      - main 
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: docker.io/2470/home_task
+  IMAGE_TAG: latest
+  K8S_NAMESPACE: default
+  RELEASE_NAME: my-release
+  CHART_PATH: helm
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and Push Docker Image
+        run: |
+          cd backend
+          docker build -t $IMAGE_NAME:$IMAGE_TAG .
+          docker push $IMAGE_NAME:$IMAGE_TAG
+
+  deploy:
+    name: Deploy to Kubernetes
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: "latest"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: "latest"
+
+      - name: Configure Kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
+          export KUBECONFIG=$(pwd)/kubeconfig
+
+      - name: Validate Kubernetes Connection
+        run: |
+          kubectl cluster-info
+          kubectl config view --minify
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install $RELEASE_NAME $CHART_PATH \
+            --namespace $K8S_NAMESPACE \
+            --set backend.image.repository=$IMAGE_NAME \
+            --set backend.image.tag=$IMAGE_TAG \
+            --values $CHART_PATH/values.yaml
+
+      - name: Wait for Deployment Readiness
+        run: |
+          kubectl rollout status deployment my-release-fastapi-app-backend -n $K8S_NAMESPACE
+
+      - name: Verify Deployment
+        run: |
+          kubectl get pods -n $K8S_NAMESPACE
+          kubectl get services -n $K8S_NAMESPACE
+
+      - name: Wait for Services to be Ready
+        run: |
+          kubectl wait --for=condition=available --timeout=90s deployment/my-release-fastapi-app-backend -n $K8S_NAMESPACE
+
+      - name: Port Forward Backend & PGAdmin
+        run: |
+          kubectl port-forward svc/my-release-fastapi-app-backend 8080:8000 &
+          kubectl port-forward svc/my-release-fastapi-app-pgadmin 5050:80 &
+
+      - name: Run API Health Checks
+        run: |
+          curl -s http://localhost:8080/health | grep '"status": "ok"' || exit 1
+          curl -s http://localhost:8080/readiness | grep '"status": "ready"' || exit 1
+          curl -X POST "http://localhost:8080/populate?count=5" | grep '"message": "5 users inserted"' || exit 1
