@@ -1,0 +1,4 @@
+apiVersion: v2
+name: fastapi-app 
+description: A Helm chart for FastAPI and PostgreSQL
+version: 1.0.0
